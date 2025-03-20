@@ -54,7 +54,7 @@
             let maxAmplitude = Math.max(...data);
 
             for (let i = 0; i < data.length; i++) {
-                if (data[i] > maxAmplitude * 0.98) { // 最も強い音の80%以上のみを採用
+                if (data[i] > maxAmplitude * 0.80) { // 最も強い音の80%以上のみを採用
                     let freq = (i * audioContext.sampleRate) / analyser.fftSize;
                     if (freq > 20 && freq < 5000) {
                         peaks.push({ freq, amplitude: data[i] });
