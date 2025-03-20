@@ -1,1 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム音階解析</title>
+    <style>
+        body { text-align: center; font-family: Arial, sans-serif; }
+        #pitch { font-size: 2em; font-weight: bold; margin-top: 20px; }
+        #chords { font-size: 1.5em; color: blue; }
+    </style>
+</head>
+<body>
+    <h1>リアルタイム音階解析</h1>
+    <button onclick="startAudio()">録音開始</button>
+    <div id="pitch">音階: なし</div>
+    <div id="chords">和音: なし</div>
 
+    <script>
+        let audioContext, analyser, microphone, bufferLength, dataArray;
+
+        async function startAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+
+            detectPitch();
+        }
+
+        function detectPitch() {
+            analyser.getByteFrequencyData(dataArray);
+            let peakFrequencies = findPeakFrequencies(dataArray);
+            let notes = peakFrequencies.map(f => getNoteFromFrequency(f)).filter(n => n);
+            
+            if (notes.length === 0) {
+                document.getElementById("pitch").textContent = `音階: なし`;
+                document.getElementById("chords").textContent = `和音: なし`;
+            } else {
+                document.getElementById("pitch").textContent = `音階: ${notes[0]}`;
+                document.getElementById("chords").textContent = `和音: ${notes.slice(1, 5).join(" - ") || "なし"}`;
+            }
+
+            requestAnimationFrame(detectPitch);
+        }
+
+        function findPeakFrequencies(data) {
+            let peaks = [];
+            let maxAmplitude = Math.max(...data);
+
+            for (let i = 0; i < data.length; i++) {
+                if (data[i] > maxAmplitude * 0.98) { // 最も強い音の80%以上のみを採用
+                    let freq = (i * audioContext.sampleRate) / analyser.fftSize;
+                    if (freq > 20 && freq < 5000) {
+                        peaks.push({ freq, amplitude: data[i] });
+                    }
+                }
+            }
+
+            peaks.sort((a, b) => b.amplitude - a.amplitude);
+            return peaks.slice(0, 4).map(p => p.freq);
+        }
+
+        function getNoteFromFrequency(freq) {
+            if (!freq) return null;
+
+            const notes = [
+                "ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"
+            ];
+            let A4 = 440;
+            let semitone = 12 * Math.log2(freq / A4);
+            let noteIndex = Math.round(semitone) % 12;
+            return notes[(noteIndex + 12) % 12];
+        }
+    </script>
+</body>
+</html>
