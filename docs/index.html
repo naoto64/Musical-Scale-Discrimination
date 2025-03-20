@@ -17,7 +17,7 @@
     <div id="chords">和音: なし</div>
 
     <script>
-        let audioContext, analyser, microphone, bufferLength, dataArray;
+        let audioContext, analyser, microphone, bufferLength, timeDomainData;
 
         async function startAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -27,16 +27,17 @@
             microphone = audioContext.createMediaStreamSource(stream);
             microphone.connect(analyser);
 
-            bufferLength = analyser.frequencyBinCount;
-            dataArray = new Uint8Array(bufferLength);
+            bufferLength = analyser.fftSize;
+            timeDomainData = new Float32Array(bufferLength);
 
             detectPitch();
         }
 
         function detectPitch() {
-            analyser.getByteFrequencyData(dataArray);
-            let peakFrequencies = findPeakFrequencies(dataArray);
-            let notes = peakFrequencies.map(f => getNoteFromFrequency(f)).filter(n => n);
+            analyser.getFloatTimeDomainData(timeDomainData);
+            let fundamentalFreqs = autoCorrelate(timeDomainData, audioContext.sampleRate);
+
+            let notes = fundamentalFreqs.map(f => getNoteFromFrequency(f)).filter(n => n);
             
             if (notes.length === 0) {
                 document.getElementById("pitch").textContent = `音階: なし`;
@@ -49,33 +50,60 @@
             requestAnimationFrame(detectPitch);
         }
 
-        function findPeakFrequencies(data) {
-            let peaks = [];
-            let maxAmplitude = Math.max(...data);
+        function autoCorrelate(buffer, sampleRate) {
+            let size = buffer.length;
+            let bestOffset = -1;
+            let bestCorrelation = 0;
+            let rms = 0;
+            let foundGoodCorrelation = false;
+            let correlations = new Array(size);
 
-            for (let i = 0; i < data.length; i++) {
-                if (data[i] > maxAmplitude * 0.80) { // 最も強い音の80%以上のみを採用
-                    let freq = (i * audioContext.sampleRate) / analyser.fftSize;
-                    if (freq > 20 && freq < 5000) {
-                        peaks.push({ freq, amplitude: data[i] });
-                    }
+            for (let i = 0; i < size; i++) {
+                let val = buffer[i];
+                rms += val * val;
+            }
+            rms = Math.sqrt(rms / size);
+            if (rms < 0.01) return []; // ノイズ除去
+
+            let maxLag = size / 2;
+            for (let lag = 0; lag < maxLag; lag++) {
+                let correlation = 0;
+
+                for (let i = 0; i < maxLag; i++) {
+                    correlation += buffer[i] * buffer[i + lag];
+                }
+
+                correlation /= maxLag;
+                correlations[lag] = correlation;
+
+                if (correlation > 0.9 && correlation > bestCorrelation) {
+                    bestCorrelation = correlation;
+                    bestOffset = lag;
+                    foundGoodCorrelation = true;
                 }
             }
 
-            peaks.sort((a, b) => b.amplitude - a.amplitude);
-            return peaks.slice(0, 4).map(p => p.freq);
+            if (!foundGoodCorrelation) return [];
+
+            let fundamentalFreqs = [];
+            let fundamentalFreq = sampleRate / bestOffset;
+
+            if (fundamentalFreq > 20 && fundamentalFreq < 5000) {
+                fundamentalFreqs.push(fundamentalFreq);
+            }
+
+            return fundamentalFreqs;
         }
 
         function getNoteFromFrequency(freq) {
             if (!freq) return null;
 
-            const notes = [
-                "ラ", "ラ#", "シ", "ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#"
-            ];
+            const noteNames = ["ラ", "ラ#", "シ", "ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#"];
             let A4 = 440;
             let semitone = 12 * Math.log2(freq / A4);
             let noteIndex = Math.round(semitone) % 12;
-            return notes[(noteIndex + 12) % 12];
+
+            return noteNames[(noteIndex + 12) % 12];
         }
     </script>
 </body>
