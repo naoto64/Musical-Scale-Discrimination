@@ -23,7 +23,7 @@
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             analyser = audioContext.createAnalyser();
-            analyser.fftSize = 2048;
+            analyser.fftSize = 4096;  // 高解像度に変更
             microphone = audioContext.createMediaStreamSource(stream);
             microphone.connect(analyser);
 
@@ -40,8 +40,8 @@
 
             let fundamentalFreq = autoCorrelate(timeDomainData, audioContext.sampleRate);
             let mainNote = getNoteFromFrequency(fundamentalFreq);
-            
-            let chordNotes = findChordNotes(frequencyData);
+
+            let chordNotes = findChordNotes(frequencyData, fundamentalFreq);
 
             if (mainNote) {
                 document.getElementById("pitch").textContent = `音階: ${mainNote}`;
@@ -66,7 +66,7 @@
                 rms += val * val;
             }
             rms = Math.sqrt(rms / size);
-            if (rms < 0.01) return null; // 音が小さい場合は無視
+            if (rms < 0.01) return null; // 小さすぎる音は無視
 
             let maxLag = size / 2;
             for (let lag = 0; lag < maxLag; lag++) {
@@ -87,21 +87,32 @@
             return sampleRate / bestOffset;
         }
 
-        function findChordNotes(frequencyData) {
-            let threshold = Math.max(...frequencyData) * 0.8; // 主音の80%以上の音のみを対象
+        function findChordNotes(frequencyData, mainFreq) {
+            let threshold = Math.max(...frequencyData) * 0.6; // 60%以上の強度を持つ音を取得
             let detectedNotes = [];
+            let peakFrequencies = [];
 
-            for (let i = 0; i < frequencyData.length; i++) {
-                if (frequencyData[i] > threshold) {
+            for (let i = 1; i < frequencyData.length - 1; i++) {
+                if (frequencyData[i] > threshold &&
+                    frequencyData[i] > frequencyData[i - 1] &&
+                    frequencyData[i] > frequencyData[i + 1]) {
                     let freq = (i * audioContext.sampleRate) / analyser.fftSize;
-                    let note = getNoteFromFrequency(freq);
-                    if (note && !detectedNotes.includes(note)) {
-                        detectedNotes.push(note);
+                    if (freq > 60 && freq < 5000) { // 有効な音域のみ対象
+                        peakFrequencies.push(freq);
                     }
                 }
             }
 
-            return detectedNotes.slice(0, 4);
+            peakFrequencies.sort((a, b) => a - b);
+
+            peakFrequencies.forEach(freq => {
+                let note = getNoteFromFrequency(freq);
+                if (note && !detectedNotes.includes(note) && freq !== mainFreq) {
+                    detectedNotes.push(note);
+                }
+            });
+
+            return detectedNotes.slice(0, 4); // 最大4音まで取得
         }
 
         function getNoteFromFrequency(freq) {
