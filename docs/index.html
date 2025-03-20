@@ -23,7 +23,8 @@
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             analyser = audioContext.createAnalyser();
-            analyser.fftSize = 4096;  // 高解像度に変更
+            analyser.fftSize = 4096;  
+            analyser.smoothingTimeConstant = 0.3;  // ノイズ低減
             microphone = audioContext.createMediaStreamSource(stream);
             microphone.connect(analyser);
 
@@ -43,13 +44,8 @@
 
             let chordNotes = findChordNotes(frequencyData, fundamentalFreq);
 
-            if (mainNote) {
-                document.getElementById("pitch").textContent = `音階: ${mainNote}`;
-                document.getElementById("chords").textContent = `和音: ${chordNotes.join(" - ") || "なし"}`;
-            } else {
-                document.getElementById("pitch").textContent = `音階: なし`;
-                document.getElementById("chords").textContent = `和音: なし`;
-            }
+            document.getElementById("pitch").textContent = `音階: ${mainNote || "なし"}`;
+            document.getElementById("chords").textContent = `和音: ${chordNotes.length > 0 ? chordNotes.join(" - ") : "なし"}`;
 
             requestAnimationFrame(detectPitch);
         }
@@ -66,7 +62,7 @@
                 rms += val * val;
             }
             rms = Math.sqrt(rms / size);
-            if (rms < 0.01) return null; // 小さすぎる音は無視
+            if (rms < 0.01) return null; // 音が小さい場合は無視
 
             let maxLag = size / 2;
             for (let lag = 0; lag < maxLag; lag++) {
@@ -88,37 +84,38 @@
         }
 
         function findChordNotes(frequencyData, mainFreq) {
-            let threshold = Math.max(...frequencyData) * 0.6; // 60%以上の強度を持つ音を取得
             let detectedNotes = [];
             let peakFrequencies = [];
+
+            let maxAmplitude = Math.max(...frequencyData);
+            let threshold = maxAmplitude * 0.6;  // 最大値の60%以上の周波数を対象
 
             for (let i = 1; i < frequencyData.length - 1; i++) {
                 if (frequencyData[i] > threshold &&
                     frequencyData[i] > frequencyData[i - 1] &&
                     frequencyData[i] > frequencyData[i + 1]) {
                     let freq = (i * audioContext.sampleRate) / analyser.fftSize;
-                    if (freq > 60 && freq < 5000) { // 有効な音域のみ対象
+                    if (freq > 60 && freq < 5000) { 
                         peakFrequencies.push(freq);
                     }
                 }
             }
 
-            peakFrequencies.sort((a, b) => a - b);
-
+            // 和音として適切な音を選別
             peakFrequencies.forEach(freq => {
                 let note = getNoteFromFrequency(freq);
-                if (note && !detectedNotes.includes(note) && freq !== mainFreq) {
+                if (note && !detectedNotes.includes(note) && Math.abs(freq - mainFreq) > 10) {
                     detectedNotes.push(note);
                 }
             });
 
-            return detectedNotes.slice(0, 4); // 最大4音まで取得
+            return detectedNotes.slice(0, 4);
         }
 
         function getNoteFromFrequency(freq) {
             if (!freq) return null;
 
-            const noteNames = ["ラ", "ラ#", "シ", "ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#"];
+            const noteNames = ["ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#", "ラ", "ラ#", "シ"];
             let A4 = 440;
             let semitone = 12 * Math.log2(freq / A4);
             let noteIndex = Math.round(semitone) % 12;
