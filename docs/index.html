@@ -18,13 +18,15 @@
 
     <script>
         let audioContext, analyser, microphone, bufferLength, timeDomainData, frequencyData;
+        let lastPitch = null;
+        let pitchStabilityCounter = 0;
 
         async function startAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             analyser = audioContext.createAnalyser();
-            analyser.fftSize = 4096;  
-            analyser.smoothingTimeConstant = 0.3;
+            analyser.fftSize = 8192;  // 高分解能
+            analyser.smoothingTimeConstant = 0.2;
             microphone = audioContext.createMediaStreamSource(stream);
             microphone.connect(analyser);
 
@@ -45,9 +47,18 @@
             }
 
             let mainNote = getNoteFromFrequency(fundamentalFreq);
+
+            // 変動が大きい場合は前回の値を保持
+            if (mainNote === lastPitch) {
+                pitchStabilityCounter++;
+            } else {
+                pitchStabilityCounter = 0;
+            }
+            lastPitch = mainNote;
+
             let chordNotes = findChordNotes(frequencyData, fundamentalFreq);
 
-            document.getElementById("pitch").textContent = `音階: ${mainNote || "なし"}`;
+            document.getElementById("pitch").textContent = `音階: ${pitchStabilityCounter > 3 ? mainNote || "なし" : "測定中..."}`;
             document.getElementById("chords").textContent = `和音: ${chordNotes.length > 0 ? chordNotes.join(" - ") : "なし"}`;
 
             requestAnimationFrame(detectPitch);
@@ -65,7 +76,7 @@
                 rms += val * val;
             }
             rms = Math.sqrt(rms / size);
-            if (rms < 0.01) return null;
+            if (rms < 0.02) return null; // 小さい音は無視
 
             let maxLag = size / 2;
             for (let lag = 0; lag < maxLag; lag++) {
@@ -82,7 +93,7 @@
                 }
             }
 
-            if (bestOffset === -1 || bestCorrelation < 0.7) return null;
+            if (bestOffset === -1 || bestCorrelation < 0.6) return null;
             return sampleRate / bestOffset;
         }
 
@@ -97,7 +108,7 @@
                 }
             }
 
-            if (maxAmplitude < 30) return null;
+            if (maxAmplitude < 40) return null;
             return (maxIndex * audioContext.sampleRate) / analyser.fftSize;
         }
 
@@ -133,10 +144,10 @@
 
             const noteNames = ["ラ", "ラ#", "シ", "ド", "ド#", "レ", "レ#", "ミ", "ファ", "ファ#", "ソ", "ソ#"];
             let A4 = 440;
-            let semitone = 12 * Math.log2(freq / A4);
-            let noteIndex = Math.round(semitone) % 12;
+            let semitone = Math.round(12 * Math.log2(freq / A4));
+            let noteIndex = (semitone + 9) % 12; // C=ドを基準に調整
 
-            return noteNames[(noteIndex + 12) % 12];
+            return noteNames[noteIndex];
         }
     </script>
 </body>
